@@ -4,3 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+quick-xml = { version = "0.40.0", features = ["serialize"] }
+serde = { version = "1.0.228", features = ["derive"] }
+
+[[bin]]
+name = "example"
+path = "src/example.rs"
