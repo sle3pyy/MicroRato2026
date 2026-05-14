@@ -1,7 +1,8 @@
-mod agent;
+mod agent2;
+mod agent_helpers;
 mod cif;
 
-use crate::agent::Agent;
+use crate::agent2::Agent2;
 use serde::Deserialize;
 use std::error::Error;
 use std::fs;
@@ -27,7 +28,7 @@ fn main() {
         config.pos, config.host
     );
 
-    let mut agent = Agent::new(config);
+    let mut agent = Agent2::new(config);
 
     agent.connect();
 }
