@@ -8,9 +8,9 @@ pub struct CiberMouse {
     network: NetworkHandler,
     port: u16,
     hostname: String,
-
     measurements: Measurements,
     parameters: Parameters,
+    counter: i32,
 }
 
 impl CiberMouse {
@@ -21,6 +21,7 @@ impl CiberMouse {
             hostname: String::new(),
             measurements: Measurements::default(),
             parameters: Parameters::default(),
+            counter: 0,
         })
     }
 
@@ -64,6 +65,7 @@ impl CiberMouse {
     fn send_actions(&mut self, actions: &ActionsMsg) {
         let xml = Codec::serialize(actions);
         self.network.send_str(&xml, &self.hostname, self.port).ok();
+        self.counter += 1
     }
 }
 
@@ -110,6 +112,7 @@ impl CiberIf for CiberMouse {
         let Ok(xml_str) = std::str::from_utf8(&buf[..size]) else {
             return;
         };
+
         let trimmed = xml_str.trim_matches(char::from(0)).trim();
         let Ok(msg) = Codec::parse_measures(trimmed) else {
             return;

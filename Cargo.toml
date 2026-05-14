@@ -6,7 +6,12 @@ edition = "2024"
 [dependencies]
 quick-xml = { version = "0.40.0", features = ["serialize"] }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml = "0.9"
 
 [[bin]]
 name = "example"
 path = "src/example.rs"
+
+[[bin]]
+name = "main"
+path = "src/main.rs"
