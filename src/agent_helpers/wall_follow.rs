@@ -40,14 +40,14 @@ impl Default for RightWallFollower {
             front_blocked_reading: 3.8,
             left_avoid_reading: 2.8,
             right_wall_visible_reading: 0.55,
-            right_too_close_reading: 4.0,
+            right_too_close_reading: 3.6,
             base_speed: 0.08,
             right_escape_left_speed: 0.05,
             right_escape_right_speed: 0.12,
             left_avoid_left_speed: 0.14,
             left_avoid_right_speed: -0.08,
             edge_recover_left_speed: 0.15,
-            edge_recover_right_speed: -0.09,
+            edge_recover_right_speed: -0.2,
             recovering_right_wall: false,
         }
     }

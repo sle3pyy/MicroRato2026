@@ -1,8 +1,6 @@
 use crate::Config;
 use crate::agent_helpers::heading::{Heading, angle_error};
-use crate::agent_helpers::position_tracker::Cell;
 use crate::agent_helpers::position_tracker::PositionTracker;
-use crate::agent_helpers::tremaux::{OpenDirections, TremauxExplorer};
 use crate::agent_helpers::wall_follow::{RightWallFollower, SensorSnapshot, WallFollowAction};
 use crate::cif::{CiberIf, CiberMouse};
 
@@ -14,10 +12,6 @@ const TURN_TOLERANCE_DEGREES: f64 = 7.0;
 const TURN_SPEED: f64 = 0.12;
 const MAX_MOTOR_POWER: f64 = 0.15;
 const GROUND_REQUEST_PERIOD: u32 = 10;
-const LEFT_OPEN_READING: f64 = 0.7;
-const FRONT_OPEN_READING: f64 = 1.2;
-const RIGHT_OPEN_READING: f64 = 0.7;
-const ENABLE_TREMAUX: bool = false;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MissionState {
@@ -59,10 +53,6 @@ pub struct Agent2 {
     sensors: SensorCache,
     wall_follower: RightWallFollower,
     position_tracker: PositionTracker,
-    tremaux: TremauxExplorer,
-    confirmed_cell: Cell,
-    planned_exit: Option<(Cell, Heading)>,
-    marked_exit: Option<(Cell, Heading)>,
     turn_target: Option<Heading>,
     collision_recovery_ticks: u32,
     debug_tick: u32,
@@ -81,10 +71,6 @@ impl Agent2 {
             sensors: SensorCache::default(),
             wall_follower: RightWallFollower::default(),
             position_tracker: PositionTracker::default(),
-            tremaux: TremauxExplorer::default(),
-            confirmed_cell: Cell::new(0, 0),
-            planned_exit: None,
-            marked_exit: None,
             turn_target: None,
             collision_recovery_ticks: 0,
             debug_tick: 0,
@@ -147,7 +133,6 @@ impl Agent2 {
             self.estimated_right_out,
             self.sensors.bumper,
         );
-        self.update_confirmed_cell();
 
         if self.mouse.get_finished() || self.state == MissionState::Finished {
             self.debug_log("finished");
@@ -220,23 +205,6 @@ impl Agent2 {
         }
     }
 
-    fn update_confirmed_cell(&mut self) {
-        let estimated_cell = self.position_tracker.current_cell();
-        let current_cell = if manhattan_distance(self.confirmed_cell, estimated_cell) <= 1 {
-            estimated_cell
-        } else {
-            self.confirmed_cell
-        };
-
-        if current_cell != self.confirmed_cell {
-            self.tremaux
-                .confirm_arrival(self.confirmed_cell, current_cell);
-            self.confirmed_cell = current_cell;
-            self.planned_exit = None;
-            self.marked_exit = None;
-        }
-    }
-
     fn explore(&mut self) {
         if self.sensors.ground == 0 {
             println!(
@@ -287,10 +255,6 @@ impl Agent2 {
             return;
         }
 
-        if self.follow_tremaux_heading() {
-            return;
-        }
-
         let action = self.wall_follower.next_action(SensorSnapshot {
             front_ir: self.sensors.front_ir,
             left_ir: self.sensors.left_ir,
@@ -316,56 +280,6 @@ impl Agent2 {
                 self.run_turn();
             }
         }
-    }
-
-    fn follow_tremaux_heading(&mut self) -> bool {
-        if !ENABLE_TREMAUX {
-            return false;
-        }
-
-        let target_heading = if let Some((cell, heading)) = self.planned_exit {
-            if cell == self.confirmed_cell {
-                Some(heading)
-            } else {
-                None
-            }
-        } else {
-            self.tremaux.next_heading(
-                self.confirmed_cell,
-                self.sensors.heading,
-                OpenDirections {
-                    front: self.sensors.front_ir < FRONT_OPEN_READING,
-                    left: self.sensors.left_ir < LEFT_OPEN_READING,
-                    right: self.sensors.right_ir < RIGHT_OPEN_READING,
-                },
-            )
-        };
-
-        let Some(target_heading) = target_heading else {
-            return false;
-        };
-
-        self.planned_exit = Some((self.confirmed_cell, target_heading));
-
-        let target_cell = match target_heading {
-            Heading::East => Cell::new(self.confirmed_cell.x + 1, self.confirmed_cell.y),
-            Heading::North => Cell::new(self.confirmed_cell.x, self.confirmed_cell.y + 1),
-            Heading::West => Cell::new(self.confirmed_cell.x - 1, self.confirmed_cell.y),
-            Heading::South => Cell::new(self.confirmed_cell.x, self.confirmed_cell.y - 1),
-        };
-
-        if target_heading == self.sensors.heading {
-            if self.marked_exit != Some((self.confirmed_cell, target_heading)) {
-                self.tremaux.record_exit(self.confirmed_cell, target_cell);
-                self.marked_exit = Some((self.confirmed_cell, target_heading));
-            }
-            return false;
-        }
-
-        self.turn_target = Some(target_heading);
-        self.debug_log("tremaux-turn");
-        self.run_turn();
-        true
     }
 
     fn run_turn(&mut self) -> bool {
@@ -457,8 +371,4 @@ impl Agent2 {
             self.sensors.bumper
         );
     }
-}
-
-fn manhattan_distance(a: Cell, b: Cell) -> i32 {
-    (a.x - b.x).abs() + (a.y - b.y).abs()
 }
