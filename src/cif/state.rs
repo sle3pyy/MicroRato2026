@@ -81,8 +81,16 @@ pub struct Parameters {
     #[serde(rename = "@CompassNoise", default)]
     pub compass_noise: f32,
 
-    #[serde(rename = "@nBeacons", default)]
+    #[serde(rename = "@NBeacons", default)]
     pub beacons: i32, // Total number of beacons present in the simulation
+
+    // Capability flags emitted by sim (cbparameters.cpp:89)
+    #[serde(rename = "@GPS", default)]
+    pub gps: String, // "On"/"Off"
+    #[serde(rename = "@BeaconSensor", default)]
+    pub beacon_sensor: String, // "On"/"Off"
+    #[serde(rename = "@CompassSensor", default)]
+    pub compass_sensor: String, // "On"/"Off"
 }
 
 impl Measurements {
@@ -94,7 +102,11 @@ impl Measurements {
             self.compass_ready = true;
         }
         if let Some(c) = &msg.sensors.collision {
-            self.collision = c == "Yes" || c == "Sim";
+            // Sim emits only "Yes"/"No" (cbrobot.cpp:2033). Anything else = wire-format drift.
+            if c != "Yes" && c != "No" {
+                eprintln!("[cif] unexpected Collision value: {:?}", c);
+            }
+            self.collision = c == "Yes";
             self.collision_ready = true;
         }
         if let Some(g) = msg.sensors.ground {
