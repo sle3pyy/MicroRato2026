@@ -107,21 +107,61 @@ pub struct ButtonsMsg {
     pub stop: Option<String>,
 }
 
-#[derive(Debug, Serialize, Default)]
+#[derive(Debug, Serialize, Deserialize, Default)]
 #[serde(rename = "Actions")]
 pub struct ActionsMsg {
-    #[serde(rename = "@LeftMotor")]
-    pub left_motor: f32,
-    #[serde(rename = "@RightMotor")]
-    pub right_motor: f32,
+    #[serde(rename = "@LeftMotor", default, skip_serializing_if = "Option::is_none")]
+    pub left_motor: Option<f32>,
+    #[serde(rename = "@RightMotor", default, skip_serializing_if = "Option::is_none")]
+    pub right_motor: Option<f32>,
 
-    #[serde(rename = "@VisitingLed", skip_serializing_if = "String::is_empty")]
+    #[serde(rename = "@VisitingLed", default, skip_serializing_if = "String::is_empty")]
     pub visiting_led: String,
-    #[serde(rename = "@ReturningLed", skip_serializing_if = "String::is_empty")]
+    #[serde(rename = "@ReturningLed", default, skip_serializing_if = "String::is_empty")]
     pub returning_led: String,
-    #[serde(rename = "@EndLed", skip_serializing_if = "String::is_empty")]
+    #[serde(rename = "@EndLed", default, skip_serializing_if = "String::is_empty")]
     pub end_led: String,
 
-    #[serde(rename = "Say", skip_serializing_if = "String::is_empty")]
+    #[serde(rename = "Say", default, skip_serializing_if = "String::is_empty")]
     pub say: String,
+
+    #[serde(rename = "SensorRequests", default, skip_serializing_if = "Option::is_none")]
+    pub sensor_requests: Option<SensorRequests>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct SensorRequests {
+    #[serde(rename = "@IRSensor0", default, skip_serializing_if = "String::is_empty")]
+    pub ir0: String,
+    #[serde(rename = "@IRSensor1", default, skip_serializing_if = "String::is_empty")]
+    pub ir1: String,
+    #[serde(rename = "@IRSensor2", default, skip_serializing_if = "String::is_empty")]
+    pub ir2: String,
+    #[serde(rename = "@IRSensor3", default, skip_serializing_if = "String::is_empty")]
+    pub ir3: String,
+    #[serde(rename = "@Compass", default, skip_serializing_if = "String::is_empty")]
+    pub compass: String,
+    #[serde(rename = "@Ground", default, skip_serializing_if = "String::is_empty")]
+    pub ground: String,
+}
+
+impl SensorRequests {
+    pub fn set(&mut self, name: &str) -> bool {
+        let slot = match name {
+            "IRSensor0" => &mut self.ir0,
+            "IRSensor1" => &mut self.ir1,
+            "IRSensor2" => &mut self.ir2,
+            "IRSensor3" => &mut self.ir3,
+            "Compass"   => &mut self.compass,
+            "Ground"    => &mut self.ground,
+            _ => return false,
+        };
+        *slot = "Yes".to_string();
+        true
+    }
+
+    pub fn count(&self) -> usize {
+        [&self.ir0, &self.ir1, &self.ir2, &self.ir3, &self.compass, &self.ground]
+            .iter().filter(|s| !s.is_empty()).count()
+    }
 }

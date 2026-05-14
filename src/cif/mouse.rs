@@ -1,6 +1,6 @@
 use super::codec::Codec;
 use super::network::NetworkHandler;
-use super::protocol::{ActionsMsg, IrSensorConfig, RobotRegistration};
+use super::protocol::{ActionsMsg, IrSensorConfig, RobotRegistration, SensorRequests};
 use super::state::{BeaconMeasure, Measurements, Parameters};
 use crate::cif::CiberIf;
 
@@ -11,6 +11,11 @@ pub struct CiberMouse {
     measurements: Measurements,
     parameters: Parameters,
     counter: i32,
+    // Per-cycle pending Actions accumulator. Flushed once per cycle in
+    // read_sensors() so all motor/LED/say/sensor-request updates ride a single
+    // UDP packet — matches reference clients (libRobSock/croblink.cpp:316).
+    pending: ActionsMsg,
+    pending_dirty: bool,
 }
 
 impl CiberMouse {
@@ -22,7 +27,35 @@ impl CiberMouse {
             measurements: Measurements::default(),
             parameters: Parameters::default(),
             counter: 0,
+            pending: ActionsMsg::default(),
+            pending_dirty: false,
         })
+    }
+
+    fn flush_pending(&mut self) {
+        if !self.pending_dirty {
+            return;
+        }
+        let xml = Codec::serialize(&self.pending);
+        self.network.send_str(&xml, &self.hostname, self.port).ok();
+        self.counter += 1;
+        // Reset for next cycle. Sim persists motor/LED state, so we only need
+        // to re-send when the agent changes them — start each cycle blank, and
+        // the user mutators flip pending_dirty only when they touch a field.
+        self.pending = ActionsMsg::default();
+        self.pending_dirty = false;
+    }
+
+    fn mark_request(&mut self, name: &str) {
+        let sr = self.pending.sensor_requests.get_or_insert_with(SensorRequests::default);
+        if !sr.set(name) {
+            eprintln!("[cif] unknown sensor request: {}", name);
+            return;
+        }
+        if sr.count() > 4 {
+            eprintln!("[cif] >4 sensor requests this cycle (sim picks 4 arbitrarily)");
+        }
+        self.pending_dirty = true;
     }
 
     fn send_init_and_parse_reply(&mut self, xml: &str) -> bool {
@@ -62,11 +95,6 @@ impl CiberMouse {
         true
     }
 
-    fn send_actions(&mut self, actions: &ActionsMsg) {
-        let xml = Codec::serialize(actions);
-        self.network.send_str(&xml, &self.hostname, self.port).ok();
-        self.counter += 1
-    }
 }
 
 impl CiberIf for CiberMouse {
@@ -105,6 +133,9 @@ impl CiberIf for CiberMouse {
     }
 
     fn read_sensors(&mut self) {
+        // Flush all pending mutations as one UDP packet before blocking on recv.
+        self.flush_pending();
+
         let mut buf = [0; 4096];
         let Ok((size, _addr)) = self.network.receive(&mut buf) else {
             return;
@@ -204,78 +235,45 @@ impl CiberIf for CiberMouse {
         self.measurements.end_led
     }
 
-    fn request_compass_sensor(&mut self) {
-        let xml = Codec::build_sensor_request("Compass");
-        self.network.send_str(&xml, &self.hostname, self.port).ok();
-    }
-
-    fn request_ground_sensor(&mut self) {
-        let xml = Codec::build_sensor_request("Ground");
-        self.network.send_str(&xml, &self.hostname, self.port).ok();
-    }
-
+    fn request_compass_sensor(&mut self) { self.mark_request("Compass"); }
+    fn request_ground_sensor(&mut self)  { self.mark_request("Ground"); }
     fn request_ir_sensor(&mut self, id: usize) {
-        let xml = Codec::build_sensor_request(&format!("IRSensor{}", id));
-        self.network.send_str(&xml, &self.hostname, self.port).ok();
+        self.mark_request(&format!("IRSensor{}", id));
     }
-
-    fn request_beacon_sensor(&mut self, id: usize) {
-        let xml = Codec::build_sensor_request(&format!("Beacon{}", id));
-        self.network.send_str(&xml, &self.hostname, self.port).ok();
+    fn request_beacon_sensor(&mut self, _id: usize) {
+        // Explorer modality has no beacons; sim ignores. Kept for trait completeness.
     }
-
     fn request_sensors(&mut self, sensor_ids: &[&str]) {
-        let xml = Codec::build_sensor_requests(sensor_ids);
-        self.network.send_str(&xml, &self.hostname, self.port).ok();
+        for id in sensor_ids { self.mark_request(id); }
     }
 
     fn drive_motors(&mut self, l_pow: f64, r_pow: f64) {
-        let actions = ActionsMsg {
-            left_motor: l_pow as f32,
-            right_motor: r_pow as f32,
-            ..Default::default()
-        };
-        self.send_actions(&actions);
+        self.pending.left_motor = Some(l_pow as f32);
+        self.pending.right_motor = Some(r_pow as f32);
+        self.pending_dirty = true;
     }
 
     fn say(&mut self, msg: &str) {
-        let actions = ActionsMsg {
-            say: msg.to_string(),
-            ..Default::default()
-        };
-        self.send_actions(&actions);
+        self.pending.say = msg.to_string();
+        self.pending_dirty = true;
     }
 
     fn set_returning_led(&mut self, val: bool) {
-        let actions = ActionsMsg {
-            returning_led: if val {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            },
-            ..Default::default()
-        };
-        self.send_actions(&actions);
+        self.pending.returning_led = if val { "On" } else { "Off" }.to_string();
+        self.pending_dirty = true;
     }
 
     fn set_visiting_led(&mut self, val: bool) {
-        let actions = ActionsMsg {
-            visiting_led: if val {
-                "On".to_string()
-            } else {
-                "Off".to_string()
-            },
-            ..Default::default()
-        };
-        self.send_actions(&actions);
+        self.pending.visiting_led = if val { "On" } else { "Off" }.to_string();
+        self.pending_dirty = true;
     }
 
     fn finish(&mut self) {
-        let actions = ActionsMsg {
-            end_led: "On".to_string(),
-            ..Default::default()
-        };
-        self.send_actions(&actions);
+        self.pending.end_led = "On".to_string();
+        self.pending_dirty = true;
+        // Flush immediately so the final signal is sent even if the user exits
+        // without another read_sensors() round-trip.
+        self.flush_pending();
     }
 
     fn get_cycle_time(&self) -> i32 {

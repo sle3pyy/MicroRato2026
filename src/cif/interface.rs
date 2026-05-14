@@ -1,3 +1,8 @@
+/// Compass sensor latency in simulation cycles. PDF table 1 + simulator
+/// `cbsensor.cpp setFifoLatency` confirm a 4-cycle FIFO delay. `get_compass_sensor`
+/// returns a value measured ~`COMPASS_LATENCY_CYCLES` cycles ago.
+pub const COMPASS_LATENCY_CYCLES: i32 = 4;
+
 pub trait CiberIf {
     // Initialization
     fn init_robot(&mut self, name: &str, pos: i32, hostname: &str) -> bool;
