@@ -21,3 +21,9 @@ pub const DRIVE_DIST_TARGET: f64 = 2.0;
 pub const DRIVE_DIST_MARGIN: f64 = 0.15;
 pub const MOTOR_NOISE_STD: f64 = 0.015;
 pub const COMPASS_NOISE_STD_DEG: f64 = 2.0;
+
+// Speedrun constants (used once map is fully known)
+pub const FAST_DRIVE_POWER: f64 = 0.15;
+pub const FAST_DRIVE_CYCLES: u32 = 20;
+pub const FAST_SETTLE_CYCLES: u32 = 1;
+pub const FAST_TURN_POWER: f64 = 0.10;

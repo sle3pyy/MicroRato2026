@@ -6,6 +6,10 @@ use serde::Deserialize;
 use std::error::Error;
 use std::fs;
 
+fn default_mode() -> String {
+    "explore".to_string()
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Config {
     pub host: String,
@@ -14,6 +18,8 @@ pub struct Config {
     pub name: String,
     #[serde(default)]
     pub debug_gps: bool,
+    #[serde(default = "default_mode")]
+    pub mode: String,
 }
 
 fn main() {

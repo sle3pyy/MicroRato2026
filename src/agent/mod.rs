@@ -9,7 +9,8 @@ mod trace;
 
 use crate::Config;
 use crate::cif::{CiberIf, CiberMouse};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::io;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use config::*;
@@ -26,6 +27,7 @@ enum AgentState {
     Explore,
     FoundTarget,
     ReturnToStart,
+    Speedrun,
     Done,
 }
 
@@ -74,6 +76,11 @@ pub struct Agent {
     settle_cycles: u32,
     no_progress_cycles: u32,
 
+    // Speedrun
+    speedrun_path: VecDeque<(Dir, u32)>,
+    speedrun_pending_count: u32,
+    fast_mode: bool,
+
     // Telemetry
     trace: Trace,
     cur_turn: Option<TurnLog>,
@@ -108,6 +115,9 @@ impl Agent {
             last_cycle_time: now(),
             settle_cycles: 0,
             no_progress_cycles: 0,
+            speedrun_path: VecDeque::new(),
+            speedrun_pending_count: 1,
+            fast_mode: false,
             trace,
             cur_turn: None,
             last_decision: "",
@@ -185,6 +195,7 @@ impl Agent {
             AgentState::Explore => self.tick_explore(),
             AgentState::FoundTarget => self.tick_found_target(),
             AgentState::ReturnToStart => self.tick_return(),
+            AgentState::Speedrun => self.tick_speedrun(),
             AgentState::Done => self.cmd_motors(0.0, 0.0),
         }
 
@@ -337,16 +348,17 @@ impl Agent {
                     self.turn_in_tol_streak = 0;
                     return true;
                 }
+                let tp = if self.fast_mode { FAST_TURN_POWER } else { TURN_POWER };
                 if err > 0.0 {
-                    self.cmd_motors(-TURN_POWER, TURN_POWER);
+                    self.cmd_motors(-tp, tp);
                 } else {
-                    self.cmd_motors(TURN_POWER, -TURN_POWER);
+                    self.cmd_motors(tp, -tp);
                 }
                 self.motion = Motion::Turning { target_dir: td, cycles_left: c - 1 };
                 false
             }
 
-            Motion::Driving { cycles_left } => {
+            Motion::Driving { cycles_left, dist_target } => {
                 if self.sense.bumper || self.sense.ir[0] > FRONT_STOP {
                     println!(
                         "[BACKUP] ({},{}) heading={:?}  bumper={}  ir_front={:.2}",
@@ -371,13 +383,15 @@ impl Agent {
                 }
 
                 let left = *cycles_left;
+                let dtgt = *dist_target;
                 let trav = self.trav_in_drive();
                 let front_block_close = self.sense.filters[0].latched && trav >= CELL_SIZE * 0.5;
-                if left == 0 || trav >= DRIVE_DIST_TARGET - DRIVE_DIST_MARGIN || front_block_close {
+                if left == 0 || trav >= dtgt - DRIVE_DIST_MARGIN || front_block_close {
                     self.cmd_motors(0.0, 0.0);
-                    self.motion = Motion::Settling { cycles_left: SETTLE_CYCLES };
+                    let sc = if self.fast_mode { FAST_SETTLE_CYCLES } else { SETTLE_CYCLES };
+                    self.motion = Motion::Settling { cycles_left: sc };
                 } else {
-                    let power = DRIVE_POWER;
+                    let power = if self.fast_mode { FAST_DRIVE_POWER } else { DRIVE_POWER };
                     let err = self.heading_error(self.heading.compass_target());
                     let heading_kp = power * 0.015;
                     let heading_corr = (err * heading_kp).clamp(-power * 0.5, power * 0.5);
@@ -399,7 +413,7 @@ impl Agent {
                     let l = (power - heading_corr + lateral_corr).max(0.0);
                     let r = (power + heading_corr - lateral_corr).max(0.0);
                     self.cmd_motors(l, r);
-                    self.motion = Motion::Driving { cycles_left: left - 1 };
+                    self.motion = Motion::Driving { cycles_left: left - 1, dist_target: dtgt };
                 }
                 false
             }
@@ -440,11 +454,12 @@ impl Agent {
 
     fn start_move(&mut self, dir: Dir) {
         let err = self.heading_error(dir.compass_target());
+        let dc = if self.fast_mode { FAST_DRIVE_CYCLES } else { DRIVE_CYCLES };
         if err.abs() < TURN_TOL_DEG {
             println!("[DRIVE] → {:?}  compass={:.1}deg", dir, self.sense.compass);
             self.heading = dir;
             self.drive_start_xy = Some((self.ekf.x, self.ekf.y));
-            self.motion = Motion::Driving { cycles_left: DRIVE_CYCLES };
+            self.motion = Motion::Driving { cycles_left: dc, dist_target: DRIVE_DIST_TARGET };
         } else {
             let raw = ((err.abs() / 90.0) * 14.0).ceil() as u32;
             let cycles = raw.max(10).min(TURN_MAX_CYCLES);
@@ -546,25 +561,44 @@ impl Agent {
                 "Start! Heading: {:?}, settled after {} cycles.",
                 self.heading, self.settle_cycles
             );
-            self.state = AgentState::Explore;
+            if self.config.mode == "speedrun" {
+                match self.load_speedrun_path() {
+                    Ok(path) if !path.is_empty() => {
+                        println!("[SPEEDRUN] Loaded {} steps from speedrun_path.txt.", path.len());
+                        self.speedrun_path = VecDeque::from(path);
+                        self.fast_mode = true;
+                        self.state = AgentState::Speedrun;
+                    }
+                    Ok(_) => {
+                        eprintln!("[SPEEDRUN] speedrun_path.txt is empty. Falling back to Explore.");
+                        self.state = AgentState::Explore;
+                    }
+                    Err(e) => {
+                        eprintln!("[SPEEDRUN] Failed to load path: {}. Falling back to Explore.", e);
+                        self.state = AgentState::Explore;
+                    }
+                }
+            } else {
+                self.state = AgentState::Explore;
+            }
         }
     }
 
     fn tick_explore(&mut self) {
-        if self.sense.ground == 0 && self.target.is_none() {
-            self.target = Some((self.row, self.col));
-            println!(
-                "Target found at ({},{})  ground={}",
-                self.col, self.row, self.sense.ground
-            );
-            self.state = AgentState::FoundTarget;
-            return;
-        }
-
         match self.motion {
             Motion::Idle => {
                 if let Some(prev) = self.pending_dir.take() {
                     self.finish_move(prev);
+                }
+                // Check ground only after finish_move so (row,col) is the arrived cell.
+                if self.sense.ground == 0 && self.target.is_none() {
+                    self.target = Some((self.row, self.col));
+                    println!(
+                        "Target found at ({},{})  ground={}",
+                        self.col, self.row, self.sense.ground
+                    );
+                    self.state = AgentState::FoundTarget;
+                    return;
                 }
                 // Second sense_walls call: streak needs WALL_CONFIRM_K consecutive
                 // readings. finish_move gives one (+1/-1); this gives the second.
@@ -595,7 +629,7 @@ impl Agent {
                     if let Some(d) = self.pending_dir {
                         self.heading = d;
                         self.drive_start_xy = Some((self.ekf.x, self.ekf.y));
-                        self.motion = Motion::Driving { cycles_left: DRIVE_CYCLES };
+                        self.motion = Motion::Driving { cycles_left: DRIVE_CYCLES, dist_target: DRIVE_DIST_TARGET };
                     }
                 }
             }
@@ -635,6 +669,27 @@ impl Agent {
                 }
                 if (self.row, self.col) == (0, 0) {
                     self.cmd_motors(0.0, 0.0);
+                    if let Some(target) = self.target {
+                        let path = planner::plan_speedrun(
+                            &self.map,
+                            (self.row, self.col),
+                            self.heading,
+                            target,
+                        );
+                        if path.is_empty() {
+                            eprintln!("[EXPLORE] No path to target found — cannot save speedrun.");
+                        } else {
+                            match self.save_speedrun_path(&path) {
+                                Ok(()) => println!(
+                                    "[EXPLORE] Saved {} steps to speedrun_path.txt. Set mode: speedrun to race.",
+                                    path.len()
+                                ),
+                                Err(e) => eprintln!("[EXPLORE] Failed to save path: {}", e),
+                            }
+                        }
+                    } else {
+                        println!("[EXPLORE] Target never found — speedrun path not saved.");
+                    }
                     self.mouse.finish();
                     println!("Returned to start! Done.");
                     self.state = AgentState::Done;
@@ -672,7 +727,7 @@ impl Agent {
                     if let Some(d) = self.pending_dir {
                         self.heading = d;
                         self.drive_start_xy = Some((self.ekf.x, self.ekf.y));
-                        self.motion = Motion::Driving { cycles_left: DRIVE_CYCLES };
+                        self.motion = Motion::Driving { cycles_left: DRIVE_CYCLES, dist_target: DRIVE_DIST_TARGET };
                     }
                 }
             }
@@ -680,6 +735,137 @@ impl Agent {
                 if self.step_motion() {
                     if let Some(prev) = self.pending_dir.take() {
                         self.finish_move(prev);
+                    }
+                }
+            }
+        }
+    }
+
+    // ── Path file I/O ─────────────────────────────────────────────────────────
+    fn save_speedrun_path(&self, path: &[Dir]) -> io::Result<()> {
+        let content: String = path.iter().map(|d| format!("{:?}\n", d)).collect();
+        std::fs::write("speedrun_path.txt", content)
+    }
+
+    // Parse file (one dir per line), run-length encode consecutive same dirs.
+    // E.g. [East,East,East,North,East] → [(East,3),(North,1),(East,1)]
+    fn load_speedrun_path(&self) -> io::Result<Vec<(Dir, u32)>> {
+        let content = std::fs::read_to_string("speedrun_path.txt")?;
+        let mut raw: Vec<Dir> = Vec::new();
+        for line in content.lines() {
+            let dir = match line.trim() {
+                "North" => Dir::North,
+                "East" => Dir::East,
+                "South" => Dir::South,
+                "West" => Dir::West,
+                "" => continue,
+                other => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("unknown direction: {}", other),
+                    ))
+                }
+            };
+            raw.push(dir);
+        }
+        let mut rle: Vec<(Dir, u32)> = Vec::new();
+        for dir in raw {
+            match rle.last_mut() {
+                Some((last_dir, count)) if *last_dir == dir => *count += 1,
+                _ => rle.push((dir, 1)),
+            }
+        }
+        Ok(rle)
+    }
+
+    // Minimal arrival update for speedrun: no map ops, no wall sensing.
+    fn finish_speedrun_move(&mut self, dir: Dir, count: u32) {
+        let (dc, dr) = dir.delta();
+        self.col += dc * count as i32;
+        self.row += dr * count as i32;
+        self.heading = dir;
+        anchor_pose_to_cell_along(&mut self.ekf, (self.row, self.col), dir);
+        println!(
+            "[SPEEDRUN] Arrived ({},{}) heading={:?}",
+            self.col, self.row, self.heading
+        );
+    }
+
+    fn tick_speedrun(&mut self) {
+        match self.motion {
+            Motion::Idle => {
+                if let Some(prev) = self.pending_dir.take() {
+                    let n = self.speedrun_pending_count;
+                    self.finish_speedrun_move(prev, n);
+                }
+                if Some((self.row, self.col)) == self.target {
+                    self.cmd_motors(0.0, 0.0);
+                    self.mouse.finish();
+                    println!(
+                        "[SPEEDRUN] Reached target ({},{}) at cycle {}! Done.",
+                        self.col, self.row, self.cycle_count
+                    );
+                    self.state = AgentState::Done;
+                    return;
+                }
+                if let Some((d, count)) = self.speedrun_path.pop_front() {
+                    println!(
+                        "[SPEEDRUN] ({},{}) → {:?} x{}  segments_left={}",
+                        self.col, self.row, d, count, self.speedrun_path.len()
+                    );
+                    self.speedrun_pending_count = count;
+                    self.pending_dir = Some(d);
+                    let err = self.heading_error(d.compass_target());
+                    if err.abs() < TURN_TOL_DEG {
+                        self.heading = d;
+                        self.drive_start_xy = Some((self.ekf.x, self.ekf.y));
+                        self.motion = Motion::Driving {
+                            cycles_left: count * FAST_DRIVE_CYCLES,
+                            dist_target: (count as f64) * CELL_SIZE,
+                        };
+                    } else {
+                        let raw = ((err.abs() / 90.0) * 14.0).ceil() as u32;
+                        let cycles = raw.max(10).min(TURN_MAX_CYCLES);
+                        println!(
+                            "[SPEEDRUN] Turn → {:?}  err={:.1}deg  cycles={}",
+                            d, err, cycles
+                        );
+                        for f in self.sense.filters.iter_mut() {
+                            f.reset();
+                        }
+                        self.turn_in_tol_streak = 0;
+                        self.motion = Motion::Turning { target_dir: d, cycles_left: cycles };
+                    }
+                } else {
+                    eprintln!("[SPEEDRUN] Path exhausted without reaching target!");
+                    self.mouse.finish();
+                    self.state = AgentState::Done;
+                }
+            }
+            Motion::Turning { .. } => {
+                // Extract target_dir before step_motion takes &mut self.
+                let td = match self.motion {
+                    Motion::Turning { target_dir, .. } => target_dir,
+                    _ => unreachable!(),
+                };
+                if self.step_motion() {
+                    // In speedrun we trust the path: always drive after the turn
+                    // even if it was "aborted" (cycles ran out but error was tiny).
+                    self.heading = td;
+                    self.pending_dir = Some(td);
+                    self.drive_start_xy = Some((self.ekf.x, self.ekf.y));
+                    let n = self.speedrun_pending_count;
+                    self.motion = Motion::Driving {
+                        cycles_left: n * FAST_DRIVE_CYCLES,
+                        dist_target: (n as f64) * CELL_SIZE,
+                    };
+                }
+            }
+            _ => {
+                if self.step_motion() {
+                    if let Some(prev) = self.pending_dir.take() {
+                        let n = self.speedrun_pending_count;
+                        self.finish_speedrun_move(prev, n);
                     }
                 }
             }

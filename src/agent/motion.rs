@@ -4,7 +4,7 @@ use super::dir::Dir;
 pub enum Motion {
     Idle,
     Turning { target_dir: Dir, cycles_left: u32 },
-    Driving { cycles_left: u32 },
+    Driving { cycles_left: u32, dist_target: f64 },
     Settling { cycles_left: u32 },
     Backup { cycles_left: u32 },
 }
