@@ -1,5 +1,5 @@
+pub use MicroRato2026::cif;
 mod agent;
-mod cif;
 
 use crate::agent::Agent;
 use serde::Deserialize;
@@ -8,10 +8,12 @@ use std::fs;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    host: String,
-    port: u16,
-    pos: i32,
-    name: String,
+    pub host: String,
+    pub port: u16,
+    pub pos: i32,
+    pub name: String,
+    #[serde(default)]
+    pub debug_gps: bool,
 }
 
 fn main() {

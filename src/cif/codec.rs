@@ -14,6 +14,10 @@ impl Codec {
         from_str(xml)
     }
 
+    pub fn parse_actions(xml: &str) -> Result<super::protocol::ActionsMsg, quick_xml::DeError> {
+        from_str(xml)
+    }
+
     pub fn serialize<T: Serialize>(obj: &T) -> String {
         to_string(obj).unwrap_or_default()
     }

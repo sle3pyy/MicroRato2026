@@ -9,9 +9,5 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_yaml = "0.9"
 
 [[bin]]
-name = "example"
-path = "src/example.rs"
-
-[[bin]]
 name = "main"
 path = "src/main.rs"
