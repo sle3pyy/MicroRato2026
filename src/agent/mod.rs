@@ -209,7 +209,11 @@ impl Agent {
             self.sense.compass_ready = true;
         }
         if self.mouse.is_ground_ready() {
-            self.sense.ground = self.mouse.get_ground_sensor();
+            let g = self.mouse.get_ground_sensor();
+            if g != self.sense.ground {
+                println!("[GROUND] ({},{}) raw={}", self.col, self.row, g);
+            }
+            self.sense.ground = g;
         }
         if self.mouse.is_bumper_ready() {
             self.sense.bumper = self.mouse.get_bumper_sensor();
@@ -547,7 +551,7 @@ impl Agent {
     }
 
     fn tick_explore(&mut self) {
-        if self.sense.ground >= 0 && self.sense.ground != 0 && self.target.is_none() {
+        if self.sense.ground == 0 && self.target.is_none() {
             self.target = Some((self.row, self.col));
             println!(
                 "Target found at ({},{})  ground={}",
@@ -599,7 +603,7 @@ impl Agent {
                 if self.step_motion() && self.pending_dir.is_some() {
                     let prev = self.pending_dir.take().unwrap();
                     self.finish_move(prev);
-                    if self.sense.ground >= 0 && self.sense.ground != 0 && self.target.is_none() {
+                    if self.sense.ground == 0 && self.target.is_none() {
                         self.target = Some((self.row, self.col));
                         println!(
                             "Target found at ({},{})  ground={}",
@@ -614,11 +618,12 @@ impl Agent {
 
     fn tick_found_target(&mut self) {
         self.cmd_motors(0.0, 0.0);
+        // §5.2: VisitingLed = currently at target; ReturningLed = committing to return.
         self.mouse.set_visiting_led(true);
         self.mouse.set_returning_led(true);
         self.motion = Motion::Idle;
         self.pending_dir = None;
-        println!("At target. Returning to start.");
+        println!("At target ({},{})! LEDs set. Returning to start.", self.col, self.row);
         self.state = AgentState::ReturnToStart;
     }
 

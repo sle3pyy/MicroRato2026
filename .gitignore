@@ -24,3 +24,8 @@ target
 # Added by cargo
 Cargo.lock
 /target
+
+
+# logs and traces
+agent_*.log
+cif_trace.csv
