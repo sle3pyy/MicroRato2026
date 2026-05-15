@@ -7,12 +7,11 @@ pub const BACKUP_POWER: f64 = -0.05;
 pub const BACKUP_CYCLES: u32 = 6;
 pub const DRIVE_CYCLES: u32 = 28;
 pub const SETTLE_CYCLES: u32 = 3;
-pub const MAX_COLLISIONS_PER_CELL: u32 = 2;
 pub const LATERAL_KP: f64 = 0.02;
 
 pub const CELL_SIZE: f64 = 2.0;
 pub const ROBOT_DIAM: f64 = 1.0;
-pub const WALL_HIGH: f64 = 2.5;
+pub const WALL_HIGH: f64 = 2.2;
 pub const WALL_LOW: f64 = 1.5;
 pub const WALL_CONFIRM_K: i32 = 2;
 pub const TURN_TOL_DEG: f64 = 4.0;

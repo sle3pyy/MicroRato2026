@@ -57,8 +57,6 @@ pub struct Agent {
     // Motion state
     motion: Motion,
     pending_dir: Option<Dir>,
-    last_collision_pos: Option<(i32, i32)>,
-    collision_count: u32,
 
     // Pose
     ekf: Ekf,
@@ -100,8 +98,6 @@ impl Agent {
             target: None,
             motion: Motion::Idle,
             pending_dir: None,
-            last_collision_pos: None,
-            collision_count: 0,
             ekf: Ekf::new(),
             motor: MotorModel::new(),
             wall_streak: HashMap::new(),
@@ -365,22 +361,6 @@ impl Agent {
                             cur.0, cur.1, self.heading
                         ));
                     }
-                    if self.last_collision_pos == Some(cur) {
-                        self.collision_count += 1;
-                        if self.collision_count > MAX_COLLISIONS_PER_CELL {
-                            println!(
-                                "[COLLISION] Hit {} times at {:?}. Returning.",
-                                self.collision_count, cur
-                            );
-                            self.state = AgentState::ReturnToStart;
-                            self.motion = Motion::Idle;
-                            self.pending_dir = None;
-                            return true;
-                        }
-                    } else {
-                        self.last_collision_pos = Some(cur);
-                        self.collision_count = 1;
-                    }
                     self.motion = Motion::Backup { cycles_left: BACKUP_CYCLES };
                     self.pending_dir = None;
                     return false;
@@ -392,7 +372,6 @@ impl Agent {
                 if left == 0 || trav >= DRIVE_DIST_TARGET - DRIVE_DIST_MARGIN || front_block_close {
                     self.cmd_motors(0.0, 0.0);
                     self.motion = Motion::Settling { cycles_left: SETTLE_CYCLES };
-                    self.collision_count = 0;
                 } else {
                     let power = DRIVE_POWER;
                     let err = self.heading_error(self.heading.compass_target());
