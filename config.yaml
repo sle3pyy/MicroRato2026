@@ -3,5 +3,3 @@ host: '127.0.0.1'
 pos: 1
 name: 'SecureRato'
 debug_gps: true
-mode: speedrun # -> load speedrun_path.txt, run at full speed
-# mode: explore # 

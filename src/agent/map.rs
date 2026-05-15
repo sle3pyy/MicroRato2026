@@ -53,10 +53,13 @@ impl DynMap {
 // reaching them was confirmed open), so this handles both:
 //   - return-to-start (goal: pos == (0,0)), traversing visited cells, AND
 //   - frontier exploration (goal: map.frontier.contains(pos)).
+// prefer: when Some(d), try d first at each node so BFS naturally picks
+// straight paths over turns when distances are equal.
 pub fn bfs_first_step(
     map: &DynMap,
     start: (i32, i32),
     goal: impl Fn(&DynMap, (i32, i32)) -> bool,
+    prefer: Option<Dir>,
 ) -> Option<Dir> {
     if goal(map, start) {
         return None;
@@ -67,8 +70,23 @@ pub fn bfs_first_step(
     queue.push_back(start);
     seen.insert(start);
 
+    // Direction order: preferred first, then the rest in natural order.
+    let dir_order: [usize; 4] = match prefer {
+        Some(p) => {
+            let pi = p as usize;
+            let mut arr = [0usize; 4];
+            arr[0] = pi;
+            let mut j = 1;
+            for i in 0..4 {
+                if i != pi { arr[j] = i; j += 1; }
+            }
+            arr
+        }
+        None => [0, 1, 2, 3],
+    };
+
     while let Some(pos) = queue.pop_front() {
-        for i in 0..4 {
+        for &i in &dir_order {
             let dir = Dir::from_index(i);
             if map.has_wall(pos, dir) {
                 continue;

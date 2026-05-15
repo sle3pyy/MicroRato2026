@@ -5,8 +5,10 @@ East
 East
 East
 North
+North
+West
+North
 East
-North
-North
+East
 East
 East

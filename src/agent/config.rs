@@ -1,13 +1,14 @@
 // Tuning constants. IR returns ~1/distance. Cell side=2, robot diam=1.
 
 pub const FRONT_STOP: f64 = 3.5;
-pub const DRIVE_POWER: f64 = 0.08;
-pub const TURN_POWER: f64 = 0.06;
+pub const DRIVE_POWER: f64 = 0.10;
+pub const TURN_POWER: f64 = 0.07;
 pub const BACKUP_POWER: f64 = -0.05;
 pub const BACKUP_CYCLES: u32 = 6;
-pub const DRIVE_CYCLES: u32 = 28;
-pub const SETTLE_CYCLES: u32 = 3;
-pub const LATERAL_KP: f64 = 0.02;
+pub const DRIVE_CYCLES: u32 = 26;
+pub const SETTLE_CYCLES: u32 = 4;
+pub const LATERAL_KP: f64 = 0.05;
+pub const HEADING_KP: f64 = 0.004;
 
 pub const CELL_SIZE: f64 = 2.0;
 pub const ROBOT_DIAM: f64 = 1.0;
@@ -22,8 +23,3 @@ pub const DRIVE_DIST_MARGIN: f64 = 0.15;
 pub const MOTOR_NOISE_STD: f64 = 0.015;
 pub const COMPASS_NOISE_STD_DEG: f64 = 2.0;
 
-// Speedrun constants (used once map is fully known)
-pub const FAST_DRIVE_POWER: f64 = 0.15;
-pub const FAST_DRIVE_CYCLES: u32 = 20;
-pub const FAST_SETTLE_CYCLES: u32 = 1;
-pub const FAST_TURN_POWER: f64 = 0.10;
